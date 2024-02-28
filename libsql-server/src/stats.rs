@@ -72,6 +72,7 @@ impl QueryStats {
             rows_written,
         }
     }
+
     fn merge(&self, another: &QueryStats) -> Self {
         Self {
             elapsed: self.elapsed + another.elapsed,
