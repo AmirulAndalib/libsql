@@ -19,6 +19,6 @@ expression: rows.next().unwrap().unwrap()
         "status",
     ): (
         Text,
-        "enqueued",
+        "\"Enqueued\"",
     ),
 }

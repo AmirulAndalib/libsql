@@ -40,7 +40,7 @@ use crate::database::{
 use crate::error::LoadDumpError;
 use crate::replication::script_backup_manager::ScriptBackupManager;
 use crate::replication::{FrameNo, ReplicationLogger};
-use crate::schema_migration::SchedulerHandle;
+use crate::schema::{handle_migration_tasks, SchedulerHandle};
 use crate::stats::Stats;
 use crate::{
     run_periodic_checkpoint, StatsSender, BLOCKING_RT, DB_CREATE_TIMEOUT, DEFAULT_AUTO_CHECKPOINT,
@@ -360,6 +360,20 @@ impl Namespace {
         )
         .await?;
         let connection_maker = Arc::new(connection_maker);
+
+        // handle pending jobs if db has a shared schema
+        if meta_store_handle.get().shared_schema_name.is_some() {
+            let conn = connection_maker.create().await?;
+            join_set.spawn_blocking(move || {
+                conn.with_raw(|conn| -> crate::Result<()> {
+                    handle_migration_tasks(conn)?;
+                    Ok(())
+                })
+                .unwrap();
+
+                Ok(())
+            });
+        }
 
         if let Some(checkpoint_interval) = ns_config.checkpoint_interval {
             join_set.spawn(run_periodic_checkpoint(

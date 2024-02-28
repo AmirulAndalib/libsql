@@ -1,7 +1,5 @@
 #![allow(clippy::mutable_key_type)]
-use std::convert::Infallible;
 use std::path::Path;
-use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::HashMap, fs::read_dir};
 
@@ -23,6 +21,7 @@ use tokio::sync::{
 
 use crate::connection::config::DatabaseConfig;
 use crate::connection::program::Program;
+use crate::schema::MigrationTaskStatus;
 use crate::{
     config::MetaStoreConfig, connection::libsql::open_conn_active_checkpoint, error::Error, Result,
 };
@@ -71,35 +70,6 @@ struct MetaStoreInner {
     configs: HashMap<NamespaceName, Sender<InnerConfig>>,
     conn: Connection,
     wal_manager: WalManager,
-}
-
-pub enum MigrationJobStatus {
-    Enqueued,
-    Success,
-    Failure,
-}
-
-impl AsRef<str> for MigrationJobStatus {
-    fn as_ref(&self) -> &str {
-        match self {
-            MigrationJobStatus::Enqueued => "enqueued",
-            MigrationJobStatus::Success => "success",
-            MigrationJobStatus::Failure => "failure",
-        }
-    }
-}
-
-impl FromStr for MigrationJobStatus {
-    type Err = Infallible;
-
-    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
-        match s {
-            "enqueued" => Ok(MigrationJobStatus::Enqueued),
-            "success" => Ok(MigrationJobStatus::Success),
-            "failure" => Ok(MigrationJobStatus::Failure),
-            _ => unreachable!(),
-        }
-    }
 }
 
 impl MetaStoreInner {
@@ -297,7 +267,7 @@ impl MetaStoreInner {
             WHERE shared_schema_name = ?",
             (
                 job_id,
-                MigrationJobStatus::Enqueued.as_ref(),
+                MigrationTaskStatus::Enqueued.encode_json(),
                 schema.as_ref(),
             ),
         )?;

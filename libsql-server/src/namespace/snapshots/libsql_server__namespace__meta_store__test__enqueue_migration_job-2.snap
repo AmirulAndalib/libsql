@@ -1,6 +1,6 @@
 ---
 source: libsql-server/src/namespace/meta_store.rs
-expression: stmt.query(()).unwrap().next().unwrap().unwrap()
+expression: rows.next().unwrap().unwrap()
 ---
 {
     Ok(
@@ -19,6 +19,6 @@ expression: stmt.query(()).unwrap().next().unwrap().unwrap()
         "status",
     ): (
         Text,
-        "enqueued",
+        "\"Enqueued\"",
     ),
 }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::connection::program::Program;
 use crate::connection::{MakeConnection, RequestContext};
 use crate::namespace::NamespaceName;
-use crate::schema_migration::SchedulerHandle;
+use crate::schema::SchedulerHandle;
 
 use super::primary::PrimaryConnectionMaker;
 use super::PrimaryConnection;
