@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -7,10 +7,13 @@ use arc_swap::ArcSwap;
 use crossbeam::deque::Injector;
 use crossbeam::sync::Unparker;
 use parking_lot::{Mutex, MutexGuard};
+use tokio::sync::mpsc;
 
+use crate::checkpointer::CheckpointMessage;
 use crate::error::{Error, Result};
 use crate::io::file::FileExt;
 use crate::io::Io;
+use crate::replication::storage::ReplicateFromStorage;
 use crate::segment::current::CurrentSegment;
 use crate::transaction::{ReadTransaction, Savepoint, Transaction, TxGuard, WriteTransaction};
 use libsql_sys::name::NamespaceName;
@@ -43,11 +46,29 @@ pub struct SharedWal<IO: Io> {
     #[allow(dead_code)] // used by replication
     pub(crate) checkpointed_frame_no: AtomicU64,
     /// max frame_no acknoledged by the durable storage
-    pub(crate) durable_frame_no: AtomicU64,
+    pub(crate) durable_frame_no: Arc<Mutex<u64>>,
     pub(crate) new_frame_notifier: tokio::sync::watch::Sender<u64>,
+    pub(crate) stored_segments: Box<dyn ReplicateFromStorage>,
+    pub(crate) shutdown: AtomicBool,
+    pub(crate) checkpoint_notifier: mpsc::Sender<CheckpointMessage>,
 }
 
 impl<IO: Io> SharedWal<IO> {
+    pub fn shutdown(&self) -> Result<()> {
+        self.shutdown.store(true, Ordering::SeqCst);
+        let mut tx = Transaction::Read(self.begin_read(u64::MAX));
+        self.upgrade(&mut tx)?;
+        {
+            let mut tx = tx.as_write_mut().unwrap().lock();
+            tx.commit();
+            self.registry.swap_current(self, &tx)?;
+        }
+        // The current segment will not be used anymore. It's empty, but we still seal it so that
+        // the next startup doesn't find an unsealed segment.
+        self.current.load().seal()?;
+        Ok(())
+    }
+
     pub fn db_size(&self) -> u32 {
         self.current.load().db_size()
     }
@@ -69,6 +90,8 @@ impl<IO: Io> SharedWal<IO> {
             created_at: Instant::now(),
             conn_id,
             pages_read: 0,
+            namespace: self.namespace.clone(),
+            checkpoint_notifier: self.checkpoint_notifier.clone(),
         }
     }
 
@@ -146,18 +169,22 @@ impl<IO: Io> SharedWal<IO> {
         let next_offset = current.count_committed() as u32;
         let next_frame_no = current.next_frame_no().get();
         *tx_id_lock = Some(read_tx.id);
+        let current_checksum = current.current_checksum();
 
         Ok(WriteTransaction {
             wal_lock: self.wal_lock.clone(),
             savepoints: vec![Savepoint {
+                current_checksum,
                 next_offset,
                 next_frame_no,
                 index: BTreeMap::new(),
             }],
             next_frame_no,
             next_offset,
+            current_checksum,
             is_commited: false,
             read_tx: read_tx.clone(),
+            recompute_checksum: None,
         })
     }
 
@@ -244,6 +271,20 @@ impl<IO: Io> SharedWal<IO> {
         Ok(())
     }
 
+    /// Cut the current log, and register it for storage
+    pub fn seal_current(&self) -> Result<()> {
+        let mut tx = self.begin_read(u64::MAX).into();
+        self.upgrade(&mut tx)?;
+        {
+            let mut guard = tx.as_write_mut().unwrap().lock();
+            guard.commit();
+            self.swap_current(&mut guard)?;
+        }
+        tx.end();
+
+        Ok(())
+    }
+
     /// Swap the current log. A write lock must be held, but the transaction must be must be committed already.
     pub(crate) fn swap_current(&self, tx: &TxGuard<IO::File>) -> Result<()> {
         self.registry.swap_current(self, tx)?;
@@ -251,7 +292,7 @@ impl<IO: Io> SharedWal<IO> {
     }
 
     pub async fn checkpoint(&self) -> Result<Option<u64>> {
-        let durable_frame_no = self.durable_frame_no.load(Ordering::SeqCst);
+        let durable_frame_no = *self.durable_frame_no.lock();
         let checkpointed_frame_no = self
             .current
             .load()
@@ -298,7 +339,7 @@ mod test {
 
         seal_current_segment(&shared);
 
-        shared.durable_frame_no.store(99999, Ordering::Relaxed);
+        *shared.durable_frame_no.lock() = 999999;
 
         let frame_no = shared.checkpoint().await.unwrap().unwrap();
         assert_eq!(frame_no, 4);

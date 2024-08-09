@@ -6,8 +6,9 @@ mod listen;
 mod result_builder;
 mod trace;
 mod types;
+#[macro_use]
+pub mod timing;
 
-use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -16,7 +17,7 @@ use axum::http::request::Parts;
 use axum::http::HeaderValue;
 use axum::response::{Html, IntoResponse};
 use axum::routing::{get, post};
-use axum::Router;
+use axum::{middleware, Router};
 use axum_extra::middleware::option_layer;
 use base64::prelude::BASE64_STANDARD_NO_PAD;
 use base64::Engine;
@@ -28,6 +29,8 @@ use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinSet;
 use tonic::transport::Server;
 
+use tower_http::compression::predicate::NotForContentType;
+use tower_http::compression::{DefaultPredicate, Predicate};
 use tower_http::{compression::CompressionLayer, cors};
 
 use crate::auth::{Auth, AuthError, Authenticated, Jwt, Permission, UserAuthContext};
@@ -35,6 +38,7 @@ use crate::connection::{Connection, RequestContext};
 use crate::error::Error;
 use crate::hrana;
 use crate::http::user::db_factory::MakeConnectionExtractorPath;
+use crate::http::user::timing::timings_middleware;
 use crate::http::user::types::HttpQuery;
 use crate::metrics::LEGACY_HTTP_CALL;
 use crate::namespace::NamespaceStore;
@@ -252,7 +256,6 @@ pub struct UserApi<A, P, S> {
     pub enable_console: bool,
     pub self_url: Option<String>,
     pub primary_url: Option<String>,
-    pub path: Arc<Path>,
     pub shutdown: Arc<Notify>,
 }
 
@@ -405,6 +408,7 @@ where
                 )
                 .route("/v1/jobs", get(handle_get_migrations))
                 .route("/v1/jobs/:job_id", get(handle_get_migration_details))
+                .layer(middleware::from_fn(timings_middleware))
                 .with_state(state);
 
             // Merge the grpc based axum router into our regular http router
@@ -428,7 +432,10 @@ where
                         .on_response(trace::response)
                         .on_failure(trace::failure),
                 )
-                .layer(CompressionLayer::new())
+                .layer(CompressionLayer::new().compress_when(
+                    // TODO: remove this when we upgrade tower-http to 0.5.3
+                    DefaultPredicate::new().and(NotForContentType::new("text/event-stream")),
+                ))
                 .layer(
                     cors::CorsLayer::new()
                         .allow_methods(cors::AllowMethods::any())

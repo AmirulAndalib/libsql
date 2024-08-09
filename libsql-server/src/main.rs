@@ -42,6 +42,8 @@ struct Cli {
 
     #[clap(long, default_value = "127.0.0.1:8080", env = "SQLD_HTTP_LISTEN_ADDR")]
     http_listen_addr: SocketAddr,
+
+    /// Enable a web-based http console served at the /console route.
     #[clap(long)]
     enable_http_console: bool,
 
@@ -144,7 +146,7 @@ struct Cli {
     #[clap(long, env = "SQLD_HEARTBEAT_URL")]
     heartbeat_url: Option<String>,
 
-    /// The HTTP "Authornization" header to include in the a server heartbeat
+    /// The HTTP "Authorization" header to include in the a server heartbeat
     /// `POST` request.
     /// By default, the server doesn't send a heartbeat.
     #[clap(long, env = "SQLD_HEARTBEAT_AUTH")]
@@ -226,6 +228,13 @@ struct Cli {
     /// S3 endpoint for the meta store backups
     #[clap(long, env = "SQLD_META_STORE_BUCKET_ENDPOINT")]
     meta_store_bucket_endpoint: Option<String>,
+
+    #[clap(
+        long,
+        env = "SQLD_META_STORE_DESTROY_ON_ERROR",
+        default_value = "false"
+    )]
+    meta_store_destroy_on_error: bool,
 
     /// encryption_key for encryption at rest
     #[clap(long, env = "SQLD_ENCRYPTION_KEY")]
@@ -586,6 +595,7 @@ fn make_meta_store_config(config: &Cli) -> anyhow::Result<MetaStoreConfig> {
     Ok(MetaStoreConfig {
         bottomless,
         allow_recover_from_fs: config.allow_metastore_recovery,
+        destroy_on_error: config.meta_store_destroy_on_error,
     })
 }
 

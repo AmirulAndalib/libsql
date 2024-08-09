@@ -205,6 +205,23 @@ double vectorF64DistanceCos(const Vector *v1, const Vector *v2){
   return 1.0 - (dot / sqrt(norm1 * norm2));
 }
 
+double vectorF64DistanceL2(const Vector *v1, const Vector *v2){
+  double sum = 0;
+  double *e1 = v1->data;
+  double *e2 = v2->data;
+  int i;
+
+  assert( v1->dims == v2->dims );
+  assert( v1->type == VECTOR_TYPE_FLOAT64 );
+  assert( v2->type == VECTOR_TYPE_FLOAT64 );
+
+  for(i = 0; i < v1->dims; i++){
+    double d = e1[i]-e2[i];
+    sum += d*d;
+  }
+  return sqrt(sum);
+}
+
 void vectorF64InitFromBlob(Vector *pVector, const unsigned char *pBlob, size_t nBlobSize){
   pVector->dims = nBlobSize / sizeof(double);
   pVector->data = (void*)pBlob;
@@ -221,11 +238,7 @@ int vectorF64ParseSqliteBlob(
 
   assert( pVector->type == VECTOR_TYPE_FLOAT64 );
   assert( 0 <= pVector->dims && pVector->dims <= MAX_VECTOR_SZ );
-
-  if( sqlite3_value_type(arg) != SQLITE_BLOB ){
-    *pzErr = sqlite3_mprintf("invalid f64 vector: not a blob type");
-    goto error;
-  }
+  assert( sqlite3_value_type(arg) == SQLITE_BLOB );
 
   pBlob = sqlite3_value_blob(arg);
   if( sqlite3_value_bytes(arg) < sizeof(double) * pVector->dims ){

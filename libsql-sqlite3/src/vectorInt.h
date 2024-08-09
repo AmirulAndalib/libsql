@@ -2,6 +2,7 @@
 #define _VECTOR_H
 
 #include "sqlite3.h"
+#include "sqliteInt.h" // for u16/u32 types
 
 #ifdef __cplusplus
 extern "C" {
@@ -78,6 +79,13 @@ float vectorDistanceCos    (const Vector *, const Vector *);
 float vectorF32DistanceCos (const Vector *, const Vector *);
 double vectorF64DistanceCos(const Vector *, const Vector *);
 
+/*
+ * Calculates L2 distance between two vectors (vector must have same type and same dimensions)
+*/
+float vectorDistanceL2    (const Vector *, const Vector *);
+float vectorF32DistanceL2 (const Vector *, const Vector *);
+double vectorF64DistanceL2(const Vector *, const Vector *);
+
 /* 
  * Serializes vector to the sqlite_blob in little-endian format according to the IEEE-754 standard
  * LibSQL can append one trailing byte in the end of final blob. This byte will be later used to determine type of the blob
@@ -94,8 +102,13 @@ int vectorParseSqliteBlob   (sqlite3_value *, Vector *, char **);
 int vectorF32ParseSqliteBlob(sqlite3_value *, Vector *, char **);
 int vectorF64ParseSqliteBlob(sqlite3_value *, Vector *, char **);
 
+void vectorInitStatic(Vector *, VectorType, const unsigned char *, size_t);
+void vectorInitFromBlob(Vector *, const unsigned char *, size_t);
 void vectorF32InitFromBlob(Vector *, const unsigned char *, size_t);
 void vectorF64InitFromBlob(Vector *, const unsigned char *, size_t);
+
+/* Detect type and dimension of vector provided with first parameter of sqlite3_value * type */
+int detectVectorParameters(sqlite3_value *, int, int *, int *, char **);
 
 #ifdef __cplusplus
 }  /* end of the 'extern "C"' block */
